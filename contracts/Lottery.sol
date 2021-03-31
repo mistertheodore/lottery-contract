@@ -3,8 +3,8 @@ pragma experimental ABIEncoderV2;
 
 import "./LotteryNFT.sol";
 import "./LotteryOwnable.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
+import "./IERC20Burnable.sol";
+import "./SafeERC20Burnable.sol";
 import "@openzeppelin/contracts/math/SafeMath.sol";
 import "@openzeppelin/contracts/proxy/Initializable.sol";
 
@@ -14,13 +14,13 @@ import "@openzeppelin/contracts/proxy/Initializable.sol";
 contract Lottery is LotteryOwnable, Initializable {
     using SafeMath for uint256;
     using SafeMath for uint8;
-    using SafeERC20 for IERC20;
+    using SafeERC20Burnable for IERC20Burnable;
 
     uint8 constant keyLengthForEachBuy = 11;
     // Allocation for first/sencond/third reward
-    uint8[3] public allocation;
+    uint8[5] public allocation;
     // The TOKEN to buy lottery
-    IERC20 public cake;
+    IERC20Burnable public cake;
     // The Lottery NFT for tickets
     LotteryNFT public lotteryNFT;
     // adminAddress
@@ -29,6 +29,9 @@ contract Lottery is LotteryOwnable, Initializable {
     uint8 public maxNumber;
     // minPrice, if decimal is not 18, please reset it
     uint256 public minPrice;
+
+
+    address constant burnAddress = 0x000000000000000000000000000000000000dEaD;
 
     // =================================
 
@@ -67,7 +70,7 @@ contract Lottery is LotteryOwnable, Initializable {
     }
 
     function initialize(
-        IERC20 _cake,
+        IERC20Burnable _cake,
         LotteryNFT _lottery,
         uint256 _minPrice,
         uint8 _maxNumber,
@@ -80,7 +83,8 @@ contract Lottery is LotteryOwnable, Initializable {
         maxNumber = _maxNumber;
         adminAddress = _adminAddress;
         lastTimestamp = block.timestamp;
-        allocation = [60, 20, 10];
+        // 4 match, 3 match, 2 match, next round, burn
+        allocation = [40, 20, 10, 20, 10];
         initOwner(_owner);
     }
 
@@ -112,10 +116,17 @@ contract Lottery is LotteryOwnable, Initializable {
         winningNumbers[3]=0;
         drawingPhase = false;
         issueIndex = issueIndex +1;
-        if(getMatchingRewardAmount(issueIndex-1, 4) == 0) {
-            uint256 amount = getTotalRewards(issueIndex-1).mul(allocation[0]).div(100);
-            internalBuy(amount, nullTicket);
-        }
+        
+        uint256 amount = getTotalRewards(issueIndex-1).mul(allocation[3]).div(100);
+        if(getMatchingRewardAmount(issueIndex-1, 4) == 0)
+            amount = getTotalRewards(issueIndex-1).mul(allocation[0]).div(100);
+        
+        // burn leftovers
+        uint256 burnAmount = cake.balanceOf(address(this)).sub(amount);
+        cake.burn(burnAmount);
+        
+        internalBuy(amount, nullTicket);
+        
         emit Reset(issueIndex);
     }
 
@@ -371,12 +382,6 @@ contract Lottery is LotteryOwnable, Initializable {
         adminAddress = _adminAddress;
     }
 
-    // Withdraw without caring about rewards. EMERGENCY ONLY.
-    function adminWithdraw(uint256 _amount) public onlyAdmin {
-        cake.safeTransfer(address(msg.sender), _amount);
-        emit DevWithdraw(msg.sender, _amount);
-    }
-
     // Set the minimum price for one ticket
     function setMinPrice(uint256 _price) external onlyAdmin {
         minPrice = _price;
@@ -388,9 +393,11 @@ contract Lottery is LotteryOwnable, Initializable {
     }
 
     // Set the allocation for one reward
-    function setAllocation(uint8 _allcation1, uint8 _allcation2, uint8 _allcation3) external onlyAdmin {
-        require (_allcation1 + _allcation2 + _allcation3 < 100, 'exceed 100');
-        allocation = [_allcation1, _allcation2, _allcation3];
+    // 4 match, 3 match, 2 match, next round, burn
+    function setAllocation(uint8 _allcation1, uint8 _allcation2, uint8 _allcation3, uint8 _allcation4) external onlyAdmin {
+        uint256 total = uint256(_allcation1) + _allcation2 + _allcation3 + _allcation4;
+        require (total < 100, "exceed 100");
+        allocation = [_allcation1, _allcation2, _allcation3, _allcation4, uint8(100 - total)];
     }
 
 }
